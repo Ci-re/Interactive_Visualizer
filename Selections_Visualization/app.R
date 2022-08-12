@@ -5,10 +5,19 @@ library(shinydashboard)
 library(shinyWidgets)
 library(plotly)
 library(ggrepel)
+library(kableExtra)
+# install.packages("elevatr")
+library(elevatr)
+
+# install.packages("htmlTable")
+library(htmlTable)
+
 # library(LaCroixColoR)
 # install.packages("LaCroixColoR")
 library(corrr)
-options(shiny.sanitize.errors = TRUE)
+library(sf)
+library(leaflet)
+# options(shiny.sanitize.errors = TRUE)
 
 ui <- dashboardPage(
   dashboardHeader(title = "Selections"),
@@ -19,9 +28,9 @@ ui <- dashboardPage(
       menuItem("Correlation Plots", tabName = "corrr"),
       menuItem("Heatmaps", tabName = "heatmaps"),
       menuItem("Images", tabName = "images"),
-      menuItem("Traits and Selection Index", tabName = "traits" ),
+      menuItem("traits and Selection Index", tabName = "traits" ),
       menuItem("Phenotypic Values", tabName = "phenotypic"),
-      menuItem("Traits Performances", tabName = "performance"),
+      menuItem("traits Performances", tabName = "performance"),
       menuItem("Interactive Map", tabName = "maps")
     )
   ),
@@ -63,7 +72,7 @@ ui <- dashboardPage(
                                       choices = c(TRUE, FALSE), selected = TRUE)
                 ),
                 box(width = 9, height = "100%", title = "Correlation Plot", status = "info", collapsible = TRUE,
-                    plotlyOutput("correlation_plot", width = "100%", height = "700px"))
+                    plotlyOutput("correlation_plot", width = "100%", height = "100%"))
               )
       ),
       tabItem(tabName = "heatmaps", 
@@ -73,7 +82,7 @@ ui <- dashboardPage(
               h2("Images")
       ),
       tabItem(tabName = "traits",
-              h2("Traits and Selection Index")
+              h2("traits and Selection Index")
       ),
       tabItem(tabName = "phenotypic",
               h2("Phenotypic Data")
@@ -96,15 +105,25 @@ ui <- dashboardPage(
       ),
       tabItem(tabName = "maps",
               h2("Interactive Map"),
-              fluuidRow(
-                column(3, uiOutput("accession_map")),
+              box(width = 12, 
+              fluidRow(
+                column(3, fileInput("geo_data", "Enter your data with coordinates")),
                 column(3, uiOutput("trait_map")),
-                column(3, uiOutput("check_map")),
-                column(3, uiOutput("size_map"))
-              ),
-              box(
-                width = 12, title = "Location of trials on Map", status = "warning", collapsible = TRUE,
-                plotlyOutput("loc_map", width = "100%", height = "700px")
+                column(3, uiOutput("checks_select")),
+                column(3, uiOutput("acc_select"))
+              )),
+              fluidRow(
+                div(style = "padding-left: 20px",
+                    uiOutput("switch")
+                  ),
+                box(
+                  width = 12, height = "100%", title = "Location of trials on Map", status = "warning", collapsible = TRUE,
+                  plotlyOutput("loc_map", width = "100%", height = "500px")
+                ),
+                box(
+                  width = 12, height = "100%", title = "GEO WORLD", status = "success", collapsible = TRUE,
+                  leafletOutput("geo_world", width = "100%", height = "700px")
+                )
               )
       )
     )
@@ -341,8 +360,361 @@ server <- function(input, output) {
     #   theme_minimal()
   })
   
+  ################################################## Maps ##################################################################
+  
+  geo_data <- reactive({
+    req(input$geo_data)
+    file <- input$geo_data
+    ext <- tools::file_ext(file$datapath)
+    validate(need(ext == "csv", "Please your data must be a csv file."))
+    read.csv(file = file$datapath)
+  })
   
   
+  wrang <- function(datageh){
+    dat <- janitor::clean_names(datageh)
+    
+    piv <- dat %>% pivot_longer(cols = -c(trait, accession, combined, category), names_to = "location", values_to = "values")
+    locs <- data.frame(location = c("Ibadan", "Mokwa", "Ago-owu", "Onne", "Otobi", "Ubiaja"), lat = c(7.3775, 9.2928, 7.2519, 4.7238, 7.1079, 6.6493),
+                       long = c(3.9470,5.0547,4.3258,7.1516,8.0897,6.3918))
+    piv2 <- piv %>%  mutate(
+      location = case_when(
+        stringr::str_detect(location, pattern = regex("ag"))        ~ "Ago-owu",
+        stringr::str_detect(location, pattern = regex("ib"))        ~ "Ibadan",
+        stringr::str_detect(location, pattern = regex("mk"))        ~ "Mokwa",
+        stringr::str_detect(location, pattern = regex("on"))        ~ "Onne",
+        stringr::str_detect(location, pattern = regex("ot"))        ~ "Otobi",
+        stringr::str_detect(location, pattern = regex("ub"))        ~ "Ubiaja",
+        stringr::str_detect(location, pattern = regex("ik"))        ~ "Ikenne"
+      )
+    ) %>% 
+      mutate(
+        long = case_when(
+          location == "Ago-owu"      ~ locs %>% filter(location=="Ago-owu") %>% select(long) %>% as.numeric(),
+          location == "Ibadan"      ~ locs %>% filter(location=="Ibadan") %>% select(long) %>% as.numeric(),
+          location == "Mokwa"      ~ locs %>% filter(location=="Mokwa") %>% select(long) %>% as.numeric(),
+          location == "Onne"      ~ locs %>% filter(location=="Onne") %>% select(long) %>% as.numeric(),
+          location == "Otobi"      ~ locs %>% filter(location=="Otobi") %>% select(long) %>% as.numeric(),
+          location == "Ubiaja"      ~ locs %>% filter(location=="Ubiaja") %>% select(long) %>% as.numeric()
+        )
+      ) %>% 
+      mutate(
+        lat = case_when(
+          location == "Ago-owu"      ~ locs %>% filter(location=="Ago-owu") %>% select(lat) %>% as.numeric(),
+          location == "Ibadan"      ~ locs %>% filter(location=="Ibadan") %>% select(lat) %>% as.numeric(),
+          location == "Mokwa"      ~ locs %>% filter(location=="Mokwa") %>% select(lat) %>% as.numeric(),
+          location == "Onne"      ~ locs %>% filter(location=="Onne") %>% select(lat) %>% as.numeric(),
+          location == "Otobi"      ~ locs %>% filter(location=="Otobi") %>% select(lat) %>% as.numeric(),
+          location == "Ubiaja"      ~ locs %>% filter(location=="Ubiaja") %>% select(lat) %>% as.numeric()
+        )
+      )
+    return(piv2)
+  }
+  
+ 
+  wrangle_data <- reactive({
+    dat <- geo_data()
+    checks <- input$checks_select
+    # locs <- data.frame(location = c("Ibadan", "Mokwa", "Ago-owu", "Onne", "Otobi", "Ubiaja"), lat = c(7.3775, 9.2928, 7.2519, 4.7238, 7.1079, 6.6493),
+    #                    long = c(3.9470,5.0547,4.3258,7.1516,8.0897,6.3918))
+    dat <- dat %>% janitor::clean_names() %>% mutate(category = if_else(accession %in% checks, "checks", "selection"))
+    return(wrang(dat))
+  })
+  
+  
+  
+  
+  output$trait_map <- renderUI({
+    pickerInput(
+      inputId = "trait",
+      label = "Please select a trait",
+      choices = c("FYLD", "DYLD", "PLANT_HEIGHT", "DM", "SPROUT","MCMDS"),
+      selected = "DYLD",
+      multiple = FALSE,
+      options = list(style = "btn-primary",`action-box` = TRUE, size = 5),
+      # choicesOpt = list(
+      #   subtext = paste("SI", 
+      #                   ayt20_sindex$sindex,
+      #                   sep = ": ")),
+      width = NULL,
+      inline = FALSE
+    )
+  })
+  
+  output$acc_select <- renderUI({
+    df <- geo_data() %>% janitor::clean_names() %>% arrange(desc(combined))
+    list_of_accession <- df$accession
+    pickerInput(
+      inputId = "acc_select",
+      label = "Select accession to visualize",
+      choices = c(list_of_accession),
+      selected = list_of_accession[[1]],
+      multiple = TRUE,
+      options = list(style = "btn-primary", `action-box` = TRUE, `live-search` = TRUE, size = 5),
+      choicesOpt = list(subtext = paste("dyld", df$combined, sep = ":")),
+      width = NULL,
+      inline = FALSE
+    )
+  })
+  
+  output$checks_select <- renderUI({
+    df <- geo_data() %>% janitor::clean_names() %>% arrange(desc(combined))
+    list_of_accession <- df$accession
+    pickerInput(
+      inputId = "checks_select",
+      label = "Select checks",
+      choices = c(list_of_accession),
+      selected = list_of_accession[[1]],
+      multiple = TRUE,
+      options = list(style = "btn-primary", `action-box` = TRUE, `live-search` = TRUE, size = 5),
+      choicesOpt = list(subtext = paste("dyld", df$combined, sep = ":")),
+      width = NULL,
+      inline = FALSE
+    )
+  })
+  
+  output$switch <- renderUI({
+    req(wrangle_data())
+    # materialSwitch(
+    #   inputId = "switch",
+    #   label = "Success", 
+    #   value = TRUE,
+    #   status = "success"
+    # )
+    
+    switchInput(
+      inputId = "switch",
+      label = "Check Difference", 
+      labelWidth = "150px"
+    )
+  })
+  
+  calc_checkmean <- function(dat){
+    checks_mean <- dat %>% 
+      filter(accession %in% checks) %>%
+      add_row(accession = "check_mean", summarise(., across(where(is.numeric), mean))) %>%
+      filter(accession == "check_mean") %>% 
+      mutate(trait = replace_na("DYLD"))
+    
+    # checks_mean %>% View()
+    check_mean_data <- bind_rows(dat,checks_mean)
+    # check_mean_data %>% View()
+    
+    piv2_difference <- check_mean_data %>% 
+      mutate(across(where(is.numeric), .fns = ~((./.[accession == "check_mean"]-1)*100)))
+    
+    
+    piv2_difference <- piv2_difference %>% 
+      mutate(category = if_else(accession %in% checks, "checks", "selection"))
+    piv2_difference <- wrang(piv2_difference)
+    
+    return(piv2_difference)
+  }
+  
+  lev1 <- st_read("NGA_population_v1_2_admin/NGA_population_v1_2_admin_level2_boundaries.shp")
+  output$loc_map <- renderPlotly({
+    req(input$acc_select)
+    # req(input$switch)
+    piv2 <- wrangle_data() %>% arrange(desc(combined))
+    # piv2 %>% View()
+    
+    # frac <- if_else(input$range == "10%", 0.1, if_else(input$range == "20%", 0.2, 
+    #                                                    if_else(input$range == "50%", 0.5, 
+    #                                                            if_else(input$range == "100%", 1.0, 0.1))))
+    
+    # filtered_piv2 <- piv2 %>% arrange(desc(combined))
+    # # View(filtered_piv2)
+    
+    selected <- input$acc_select
+    
+    piv2 <- piv2 %>% filter(accession %in% selected)
+    # piv2 %>% View()
+    
+    if(input$switch == FALSE){
+      tf <- ggplot() + 
+        # geom_sf(data = lev1, show.legend = TRUE) + 
+        geom_sf(data = lev1, colour = "white", fill = "grey", size = .1) + 
+        geom_text(data = piv2, aes(x = long, y = lat, label = location), nudge_x = .2, nudge_y = .3, check_overlap = FALSE) +
+        geom_point(data = piv2, mapping = aes(x = long, y = lat, size = values, fill = values, color = category,
+                                              text = paste0("<b> trait: ",trait,"</b> \n",
+                                                            "<b> accession: ", accession, "</b> \n",
+                                                            "<b> DYLD: ",values,"</b>")))+
+        # scale_color_viridis_c() +
+        scale_fill_gradient2(low = "red", midpoint = 6.357, mid = "yellow", high = "green") +
+        scale_color_discrete(low = "blue", mid = "white", high = "darkblue") +
+        # coord_sf(xlim = c(2, 6), ylim = c(6, 10), expand = FALSE) +
+        # geom_sf_text(data = lev1, aes(label = statename)) +
+        # theme(panel.grid.major = element_line(color = gray(0.5), linetype = "dashed", 
+        #                                       size = 0.5), panel.background = element_rect(fill = "aliceblue")) +
+        facet_wrap(~fct_inorder(accession), ncol = 2) +
+        theme_gray()
+      return(plotly::ggplotly(tf, tooltip = "text"))
+      
+    } else {
+      checks <- input$checks_select
+      dat <- geo_data() %>% janitor::clean_names() %>% arrange(desc(combined))
+      # dat %>% View()
+
+      if(length(checks) >= 0){
+        piv2_difference <- calc_checkmean(dat)
+        piv2_difference <- piv2_difference %>% filter(accession %in% selected)
+        
+        tf <- ggplot() + 
+          # geom_sf(data = lev1, show.legend = TRUE) + 
+          
+          geom_sf(data = lev1, colour = "white", fill = "grey", size = .1) + 
+          geom_text(data = piv2_difference, aes(x = long, y = lat, label = location), 
+                    nudge_x = .2, nudge_y = .3, check_overlap = FALSE) +
+          geom_point(data = piv2_difference, mapping = aes(x = long, y = lat, size = values, fill = values, color = category,
+                                                text = paste0("<b> trait: ",trait,"</b> \n",
+                                                              "<b> accession: ", accession, "</b> \n",
+                                                              "<b> DYLD: ",values,"</b>")))+
+          # scale_color_viridis_c() +
+          scale_fill_gradient2(low = "red", midpoint = 0, mid = "yellow", high = "green") +
+          scale_colour_discrete() +
+          # coord_sf(xlim = c(2, 6), ylim = c(6, 10), expand = FALSE) +
+          # geom_sf_text(data = lev1, aes(label = statename)) +
+          # theme(panel.grid.major = element_line(color = gray(0.5), linetype = "dashed", 
+          #                                       size = 0.5), panel.background = element_rect(fill = "aliceblue")) +
+          facet_wrap(~fct_inorder(accession), ncol = 2) +
+          theme_gray()
+        return(plotly::ggplotly(tf, tooltip = "text"))
+      }
+      
+      
+    }
+  })
+  
+  output$geo_world <- renderLeaflet({
+    # lev1 <- st_read("NGA_population_v1_2_admin/NGA_population_v1_2_admin_level2_boundaries.shp")
+    
+    req(input$acc_select)
+    # req(input$switch)
+    piv2 <- wrangle_data() %>% arrange(desc(combined))
+    # piv2 %>% View()
+    
+    # frac <- if_else(input$range == "10%", 0.1, if_else(input$range == "20%", 0.2, 
+    #                                                    if_else(input$range == "50%", 0.5, 
+    #                                                            if_else(input$range == "100%", 1.0, 0.1))))
+    # lev1 <- st_read("NGA_population_v1_2_admin/NGA_population_v1_2_admin_level2_boundaries.shp")
+    # filtered_piv2 <- piv2 %>% arrange(desc(combined))
+    # # View(filtered_piv2)
+    
+    selected <- input$acc_select
+    
+    piv2 <- piv2 %>% filter(accession %in% selected[length(selected)])
+    print(selected)
+    # piv2 %>% View()
+    
+    if(input$switch == FALSE){
+      lev1 %>% leaflet() %>%
+        addProviderTiles(providers$Esri.WorldImagery, group = "World Imagery") %>%
+        addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+        addLayersControl(baseGroups = c("Toner Lite", "World Imagery")) %>% 
+        # addPolygons(color = "#cecece", weight = .8, smoothFactor = 0.5, 
+        #             fillOpacity = .1,
+        #             layerId = ~statename,
+        #             highlightOptions = highlightOptions(color = "red", weight = 1, bringToFront = TRUE)) %>% 
+        # addMarkers(label = ayt20_sindex$accession_name, 
+        #            clusterOptions = markerClusterOptions(),
+        #            popup = ifelse(ayt20_sindex$accession_name == "IITA-TMS-IBA000070",
+        #                           "IITA-TMS-IBA000070 is the one", # Value if True
+        #                           "Not the one")) %>% 
+        addCircleMarkers(data = piv2, lng = ~long, lat = ~lat, 
+                         radius = ~ifelse(values > 6, 15, 7), 
+                         color = ~if_else(values > 6,"green","red"),
+                         fill = ~if_else(values > 6,"green","red"),
+                         stroke = FALSE,
+                         popup = ~paste("<table> 
+                                            <tr> 
+                                              <th> Variable </th> 
+                                              <th> Value </th> 
+                                            </tr>
+                                            <tr>
+                                              <td> Accession </td>
+                                              <td>",accession ,"</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Dry Yield </td>
+                                              <td>",values,"</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Location </td>
+                                              <td>",location ,"</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Category </td>
+                                              <td>",category ,"</td>
+                                            </tr>
+                                          </table>")) %>%
+        setView(lng = 9.0820, lat = 8.6753, zoom = 6) %>% 
+        addMiniMap(
+          toggleDisplay = TRUE,
+          tiles = providers$Stamen.TonerLite
+        )
+
+    } else {
+      checks <- input$checks_select
+      dat <- geo_data() %>% janitor::clean_names() %>% arrange(desc(combined))
+      # dat %>% View()
+      
+      if(length(checks) >= 0){
+        
+        piv2_difference <- calc_checkmean(dat)
+        piv2_difference <- piv2_difference %>% filter(accession %in% selected)
+        
+        lev1 %>% leaflet() %>%
+          addProviderTiles(providers$Esri.WorldImagery, group = "World Imagery") %>%
+          addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+          addLayersControl(baseGroups = c("Toner Lite", "World Imagery", "Topography")) %>% 
+          # addPolygons(color = "#cecece", weight = .8, smoothFactor = 0.5, 
+          #             fillOpacity = .1,
+          #             layerId = ~statename,
+          #             highlightOptions = highlightOptions(color = "red", weight = 1, bringToFront = TRUE)) %>% 
+          # addMarkers(label = ayt20_sindex$accession_name, 
+          #            clusterOptions = markerClusterOptions(),
+          #            popup = ifelse(ayt20_sindex$accession_name == "IITA-TMS-IBA000070",
+          #                           "IITA-TMS-IBA000070 is the one", # Value if True
+          #                           "Not the one")) %>% 
+          addCircleMarkers(data = piv2_difference, lng = ~long, lat = ~lat, 
+                           radius = ~ifelse(values > 0, 15, 7), 
+                           color = ~if_else(values > 0,"green","red"),
+                           fill = ~if_else(values > 0,"green","red"),
+                           stroke = FALSE,
+                           popup = ~paste("<table style = ","border","> 
+                                            <tr> 
+                                              <th> Variable </th> 
+                                              <th> Value </th> 
+                                            </tr>
+                                            <tr>
+                                              <td> Accession </td>
+                                              <td>",accession ,"</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Summary </td>
+                                              <td>",if_else(values >= 0, 
+                                                paste(round(values, 2),"% greater check-mean"), 
+                                                paste0(round(values, 2),"% lesser than check mean")) ,
+                                              "</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Location </td>
+                                              <td>",location ,"</td>
+                                            </tr>
+                                            <tr>
+                                              <td> Category </td>
+                                              <td>",category ,"</td>
+                                            </tr>
+                                          </table>")) %>%
+          setView(lng = 9.0820, lat = 8.6753, zoom = 6) %>% 
+          addMiniMap(
+            toggleDisplay = TRUE,
+            tiles = providers$Stamen.TonerLite
+          )
+      }
+    }
+    
+  })
 }
 
 shinyApp(ui, server)
